@@ -8,3 +8,4 @@ python-dotenv
 langgraph-checkpoint-postgres 
 psycopg[binary]
 trustcall
+langsmith
