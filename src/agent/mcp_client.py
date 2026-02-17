@@ -1,8 +1,7 @@
-# simple mutliserverclient
-
 from langchain_mcp_adapters.client import MultiServerMCPClient 
 import asyncio
 from langchain_core.tools import StructuredTool
+
 async def get_client():
     client = MultiServerMCPClient({
         "local_tools":{
@@ -21,4 +20,5 @@ async def get_client():
 
     return client
 
-asyncio.run(get_client())
+if __name__=="__main__":
+    asyncio.run(get_client())
