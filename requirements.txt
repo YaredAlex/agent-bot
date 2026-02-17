@@ -4,3 +4,7 @@ langchain-mcp-adapters
 mcp 
 fastapi 
 uvicorn
+python-dotenv
+langgraph-checkpoint-postgres 
+psycopg[binary]
+trustcall
