@@ -8,6 +8,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.postgres import PostgresStore 
+from langgraph.store.postgres.aio import AsyncPostgresStore
 from langgraph.store.memory import InMemoryStore
 from langgraph.store.base import BaseStore
 from psycopg_pool import ConnectionPool,AsyncConnectionPool
@@ -15,9 +16,10 @@ from langchain_core.messages import SystemMessage,HumanMessage,AIMessage,merge_m
 from langgraph.graph import MessagesState,START,END,StateGraph
 from langgraph.prebuilt import ToolNode,tools_condition
 from langchain_ollama.chat_models import ChatOllama
-from typing import TypedDict, Literal,Optional
+from typing import TypedDict, Literal,Optional,List,Dict
 from pydantic import BaseModel,Field
 from trustcall import create_extractor
+
 #Setting environment
 os.environ["LANGCHAIN_TRACING"] = "true"
 os.environ["LANGSMITH_PROJECT"]="My First App"
@@ -42,7 +44,7 @@ Here is the current User Profile (may be empty if no information has been collec
 {user_profile}
 </user_profile>
 
-Here is the User shopping histry (may be empty if no purchase have been added yet):
+Here is the User shopping history (may be empty if no purchase have been added yet):
 <history>
 {history}
 </history>
@@ -73,11 +75,13 @@ TRUSTCALL_INSTRUCTION = """Reflect on following interaction.
 
 Use the provided tools to retain any necessary memories about the user.
 
+Use parallel tool calling to handle updates and insertions simultaneously.
+
 System Time: {time}"""
 
 
 class AssistantAgent:
-     def __init__(self,llm=None,tools=[],conn_string=None,sync=False):
+    def __init__(self,llm=None,tools=[],conn_string=None,sync=False):
 
         if llm==None:
             raise ValueError("llm can not be None")
@@ -85,24 +89,26 @@ class AssistantAgent:
             print("Warrning conn_string is None message persist Inmemory")
 
         self.conn_string = conn_string or "postgresql://postgres:root@localhost:5432/agent_bot"
-        if self.conn_string:
-            self.pool = ConnectionPool(conn_string, kwargs={"autocommit": True}) if sync else AsyncConnectionPool(conn_string,kwargs={"autocommit":True},open=False)
-            # self.memory = PostgresSaver(self.pool)
-            if sync:
-                self.memory = PostgresSaver(self.pool)
-            else:
-                await self.pool.open(wait=True, timeout=5)
-                self.memory = AsyncPostgresSaver(self.pool)
-            self.store = PostgresStore(self.pool)
-        else:
-            self.memory = InMemorySaver()
-            self.store = InMemoryStore()
-        #  NOTE: you need to call .setup() the first time you're using your checkpointer
-        self.memory.setup()
-        self.store.setup()
+        self.sync = sync
+        # if self.conn_string:
+        #     self.pool = ConnectionPool(conn_string, kwargs={"autocommit": True}) if sync else AsyncConnectionPool(conn_string,kwargs={"autocommit":True},open=False)
+        #     # self.memory = PostgresSaver(self.pool)
+        #     if sync:
+        #         self.memory = PostgresSaver(self.pool)
+        #     else:
+        #         await self.pool.open(wait=True, timeout=5)
+        #         self.memory = AsyncPostgresSaver(self.pool)
+            
+        #     self.store = PostgresStore(self.pool)
+        # else:
+        #     self.memory = InMemorySaver()
+        #     self.store = InMemoryStore()
+        # #  NOTE: you need to call .setup() the first time you're using your checkpointer
+        # self.memory.setup()
+        # self.store.setup()
         # binding tool
         self.llm = llm
-        self.tools = tools + AgentMemoryTools(memory=self.memory,store=self.store,llm=self.llm).get_tools()
+        self.tools = tools + AgentMemoryTools(llm=self.llm).get_tools()
         self.llm_with_tools = self._bind_tools(self.tools)
 
     def _bind_tools(self,tools):
@@ -112,7 +118,7 @@ class AssistantAgent:
         self.conn_string = conn_string
     
     
-    def _build_graph(self):
+    async def _build_graph(self):
        
         # Node definitions
         def assistant(state: MessagesState, config: RunnableConfig, store: BaseStore):
@@ -272,11 +278,32 @@ class AssistantAgent:
         self.builder.add_edge("update_profile","assistant")
         self.builder.add_edge("update_history","assistant")
         self.builder.add_edge("tools","assistant")
+        await self.init_memory()
         self.graph = self.builder.compile(checkpointer=self.memory,store=self.store)
         return self.graph
     
-    def get_graph(self):
-        return self._build_graph()
+    async def get_graph(self):
+        return await self._build_graph()
+    
+    async def init_memory(self):
+        sync = self.sync or False
+        if self.conn_string:
+            # self.memory = PostgresSaver(self.pool)
+            if sync:
+                self.pool = ConnectionPool(conn_string, kwargs={"autocommit": True})
+                self.memory = PostgresSaver(self.pool)
+                self.store = PostgresStore(self.pool)
+            else:
+                self.apool =  AsyncConnectionPool(conn_string,kwargs={"autocommit":True},open=False)
+                await self.apool.open(wait=True, timeout=5)
+                self.memory = AsyncPostgresSaver(self.apool)
+                self.store = AsyncPostgresStore(self.apool)
+        else:
+            self.memory = InMemorySaver()
+            self.store = InMemoryStore()
+        #  NOTE: you need to call .setup() the first time you're using your checkpointer
+        self.memory.setup()
+        self.store.setup()
     
 
 ####
@@ -284,24 +311,104 @@ class AssistantAgent:
 ####
 # User profile schema
 class Profile(BaseModel):
-    """This is the profile of the user you are chatting with"""
-    name: Optional[str] = Field(description="The user's name", default=None)
-    location: Optional[str] = Field(description="The user's location", default=None)
-    job: Optional[str] = Field(description="The user's job", default=None)
-    connections: list[str] = Field(
-        description="Personal connection of the user, such as family members, friends, or coworkers",
-        default_factory=list
+    """
+    Persistent user profile for e-commerce recommendation agent.
+    Stores long-term preferences and behavioral signals.
+    """
+
+    # --- Basic Info ---
+    user_id: Optional[str] = Field(
+        default=None,
+        description="Unique identifier of the user"
     )
-    interests: list[str] = Field(
-        description="Interests that the user has", 
-        default_factory=list
+
+    name: Optional[str] = Field(
+        default=None,
+        description="User's name"
+    )
+
+    location: Optional[str] = Field(
+        default=None,
+        description="Shipping location or country"
+    )
+
+    # --- Shopping Preferences ---
+    preferred_categories: List[str] = Field(
+        default_factory=list,
+        description="Product categories the user frequently buys or browses (e.g., electronics, fashion, books)"
+    )
+
+    preferred_brands: List[str] = Field(
+        default_factory=list,
+        description="Brands the user prefers or frequently purchases"
+    )
+
+    preferred_colors: List[str] = Field(
+        default_factory=list,
+        description="Colors the user prefers when selecting products"
+    )
+
+    preferred_sizes: List[str] = Field(
+        default_factory=list,
+        description="Clothing or shoe sizes if applicable"
+    )
+
+    style_preferences: List[str] = Field(
+        default_factory=list,
+        description="Style keywords such as minimalist, sporty, luxury, casual"
+    )
+
+    # --- Budget & Pricing Behavior ---
+    price_range_min: Optional[float] = Field(
+        default=None,
+        description="Minimum preferred budget"
+    )
+
+    price_range_max: Optional[float] = Field(
+        default=None,
+        description="Maximum preferred budget"
+    )
+
+    price_sensitivity: Optional[str] = Field(
+        default=None,
+        description="Indicates if user prefers discounts, premium products, or best value"
+    )
+
+    # --- Behavioral Signals ---
+    frequently_viewed_items: List[str] = Field(
+        default_factory=list,
+        description="IDs or names of products frequently viewed"
+    )
+
+    recently_purchased_items: List[str] = Field(
+        default_factory=list,
+        description="Recent purchases used for recommendations"
+    )
+
+    abandoned_cart_items: List[str] = Field(
+        default_factory=list,
+        description="Products added to cart but not purchased"
+    )
+
+    # --- Recommendation Memory ---
+    disliked_categories: List[str] = Field(
+        default_factory=list,
+        description="Categories the user explicitly dislikes"
+    )
+
+    excluded_brands: List[str] = Field(
+        default_factory=list,
+        description="Brands the user does not want to see"
+    )
+
+    # --- Additional Structured Metadata ---
+    attributes: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional structured attributes like preferred_material: cotton"
     )
 class AgentMemoryTools:
-    def __init__(self,memory=None,store=None,llm=None):
-        assert memory!=None or store!=None,"Memory and Store are None"
+    def __init__(self,llm=None):
         assert llm!=None, "Warning agentMemory needs LLM model"
-        self.memory = memory
-        self.store = store
         self.llm = llm
 
     def get_tools(self):
