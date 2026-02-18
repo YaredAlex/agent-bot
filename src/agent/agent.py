@@ -5,11 +5,12 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.store.postgres import PostgresStore
+from langgraph.store.postgres import PostgresStore 
 from langgraph.store.memory import InMemoryStore
 from langgraph.store.base import BaseStore
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool,AsyncConnectionPool
 from langchain_core.messages import SystemMessage,HumanMessage,AIMessage,merge_message_runs
 from langgraph.graph import MessagesState,START,END,StateGraph
 from langgraph.prebuilt import ToolNode,tools_condition
@@ -76,7 +77,7 @@ System Time: {time}"""
 
 
 class AssistantAgent:
-    def __init__(self,llm=None,tools=[],conn_string=None):
+     def __init__(self,llm=None,tools=[],conn_string=None,sync=False):
 
         if llm==None:
             raise ValueError("llm can not be None")
@@ -85,8 +86,13 @@ class AssistantAgent:
 
         self.conn_string = conn_string or "postgresql://postgres:root@localhost:5432/agent_bot"
         if self.conn_string:
-            self.pool = ConnectionPool(conn_string, kwargs={"autocommit": True})
-            self.memory = PostgresSaver(self.pool)
+            self.pool = ConnectionPool(conn_string, kwargs={"autocommit": True}) if sync else AsyncConnectionPool(conn_string,kwargs={"autocommit":True},open=False)
+            # self.memory = PostgresSaver(self.pool)
+            if sync:
+                self.memory = PostgresSaver(self.pool)
+            else:
+                await self.pool.open(wait=True, timeout=5)
+                self.memory = AsyncPostgresSaver(self.pool)
             self.store = PostgresStore(self.pool)
         else:
             self.memory = InMemorySaver()
@@ -316,17 +322,17 @@ class AgentMemoryTools:
 
 
 
-# testing react-agent
-llm = ChatOllama( model="gpt-oss:20b",
-    temperature="0")
-# initializing graph
-agent = AssistantAgent( 
-    llm=llm,
-    conn_string=conn_string,
-    tools=[],
-).get_graph()
+# # testing react-agent
+# llm = ChatOllama( model="gpt-oss:20b",
+#     temperature="0")
+# # initializing graph
+# agent = AssistantAgent( 
+#     llm=llm,
+#     conn_string=conn_string,
+#     tools=[],
+# ).get_graph()
 
-config = {"configurable": {"thread_id": "user_id_1", "user_id": "demo_user"}}
+# config = {"configurable": {"thread_id": "user_id_1", "user_id": "demo_user"}}
 
-for chunk in agent.stream({"messages": "could you summarize our conversation?"}, config, stream_mode="values"):
-    chunk["messages"][-1].pretty_print()
+# for chunk in agent.stream({"messages": "could you summarize our conversation?"}, config, stream_mode="values"):
+#     chunk["messages"][-1].pretty_print()

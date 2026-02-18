@@ -1,4 +1,3 @@
-# demo mcp server
 from mcp.server.fastmcp import FastMCP 
 
 mcp = FastMCP("local_tools",port="3001")
