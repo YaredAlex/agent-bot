@@ -14,9 +14,9 @@ async def get_client():
     for tool in tools:
         print("tool name ",tool.name)
 
-    # invoking tool to check response
-    for tool in tools:
-        print(await tool.ainvoke({"user_id":"id"}))
+    # # invoking tool to check response
+    # for tool in tools:
+    #     print(await tool.ainvoke({"user_id":"id"}))
 
     return client
 
