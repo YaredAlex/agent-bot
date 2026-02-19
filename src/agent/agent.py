@@ -22,7 +22,7 @@ from trustcall import create_extractor
 
 #Setting environment
 os.environ["LANGCHAIN_TRACING"] = "true"
-os.environ["LANGSMITH_PROJECT"]="My First App"
+os.environ["LANGSMITH_PROJECT"]="Agent"
 #CheckPointer
 conn_string = "postgresql://postgres:root@localhost:5432/agent_bot"
 # pool = ConnectionPool(conn_string, kwargs={"autocommit": True})
@@ -60,7 +60,6 @@ Here are your instructions for reasoning about the user's messages:
 
 2. Decide whether any of the your long-term memory should be updated:
 - If personal information was provided about the user, update the user's profile by calling update_profile tool
-- If needed update user history when updating profile to personalize conversation
 
 3. Tell the user that you have updated your memory, if appropriate:
 - Do not tell the user you have updated the user's profile
@@ -255,8 +254,8 @@ class AssistantAgent:
             if tool_name == "update_profile":
                 return "update_profile"
 
-            elif tool_name == "update_history":
-                return "update_history"
+            # elif tool_name == "update_history":
+            #     return "update_history"
 
             # elif tool_name == "update_instructions":
             #     return "update_instructions"
@@ -276,7 +275,7 @@ class AssistantAgent:
         self.builder.add_edge(START,"assistant")
         self.builder.add_conditional_edges("assistant",route_message)
         self.builder.add_edge("update_profile","assistant")
-        self.builder.add_edge("update_history","assistant")
+        # self.builder.add_edge("update_history","assistant")
         self.builder.add_edge("tools","assistant")
         await self.init_memory()
         self.graph = self.builder.compile(checkpointer=self.memory,store=self.store)
