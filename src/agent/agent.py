@@ -89,22 +89,6 @@ class AssistantAgent:
 
         self.conn_string = conn_string or "postgresql://postgres:root@localhost:5432/agent_bot"
         self.sync = sync
-        # if self.conn_string:
-        #     self.pool = ConnectionPool(conn_string, kwargs={"autocommit": True}) if sync else AsyncConnectionPool(conn_string,kwargs={"autocommit":True},open=False)
-        #     # self.memory = PostgresSaver(self.pool)
-        #     if sync:
-        #         self.memory = PostgresSaver(self.pool)
-        #     else:
-        #         await self.pool.open(wait=True, timeout=5)
-        #         self.memory = AsyncPostgresSaver(self.pool)
-            
-        #     self.store = PostgresStore(self.pool)
-        # else:
-        #     self.memory = InMemorySaver()
-        #     self.store = InMemoryStore()
-        # #  NOTE: you need to call .setup() the first time you're using your checkpointer
-        # self.memory.setup()
-        # self.store.setup()
         # binding tool
         self.llm = llm
         self.tools = tools + AgentMemoryTools(llm=self.llm).get_tools()
