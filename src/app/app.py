@@ -38,7 +38,6 @@ def get_health(response:Response):
 @app.post("/")
 def chat_assistant(message:str=Form(...),user_id:Union[str,int]=Form(...)):
     config = {"configurable": {"thread_id": user_id, "user_id": user_id}}
-   
     def event_generator():
          for message_chunk,meta_data in agent.stream(
             {"messages": message},
@@ -56,10 +55,10 @@ def chat_assistant(message:str=Form(...),user_id:Union[str,int]=Form(...)):
     return StreamingResponse(
         event_generator(),
         media_type="text/plain",
-         headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
+        #  headers={
+        #     "Cache-Control": "no-cache",
+        #     "Connection": "keep-alive",
+        # }
     )
     # response = agent.stream({"messages": message}, config, stream_mode="values")
     # return response
@@ -89,14 +88,12 @@ def chat_assistant(message:str=Form(...),user_id:Union[str,int]=Form(...)):
 async def init_agent():
     client = await get_client()
     tools = await client.get_tools()
-    print("tools are ",tools)
     agent = await AssistantAgent( 
                         llm=llm,
                         conn_string="postgresql://postgres:root@localhost:5432/agent_bot",
                         tools=tools,
                         sync=True
                         ).get_graph()
-    print("agent is created")
     return agent
 
 if __name__=="__main__":
