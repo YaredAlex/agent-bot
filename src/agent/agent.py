@@ -19,6 +19,7 @@ from langchain_ollama.chat_models import ChatOllama
 from typing import TypedDict, Literal,Optional,List,Dict
 from pydantic import BaseModel,Field
 from trustcall import create_extractor
+from langchain_core.tools import tool
 
 #Setting environment
 os.environ["LANGCHAIN_TRACING"] = "true"
@@ -104,14 +105,14 @@ class AssistantAgent:
     async def _build_graph(self):
        
         # Node definitions
-        def assistant(state: MessagesState, config: RunnableConfig, store: BaseStore):
+        async def assistant(state: MessagesState, config: RunnableConfig, store: BaseStore):
             """Load memories from the store and use them to personalize the chatbot's response."""
             # Get the user ID from the config
             user_id = config["configurable"]["user_id"]
 
             # Retrieve profile memory from the store
             namespace = ("profile", user_id)
-            memories = store.search(namespace)
+            memories = await store.asearch(namespace)
             if memories:
                 user_profile = memories[0].value
             else:
@@ -119,20 +120,20 @@ class AssistantAgent:
             print("user profile ",user_profile)
             # retrive history
             namespace = ("history", user_id)
-            memories = store.search(namespace)
+            memories = await store.asearch(namespace)
             history = "\n".join(f"{mem.value}" for mem in memories)
             print("user history ",history)
             # Retrieve custom instructions
             namespace = ("instructions", user_id)
-            memories = store.search(namespace)
+            memories = await store.asearch(namespace)
             if memories:
                 instructions = memories[0].value
             else:
                 instructions = ""
-            
+            print("instructions ",instructions)
             system_msg = MODEL_SYSTEM_MESSAGE.format(user_profile=user_profile, history=history, instructions=instructions)
             # Respond using memory as well as the chat history
-            response = self.llm_with_tools.invoke([SystemMessage(content=system_msg)]+state["messages"])
+            response = await self.llm_with_tools.ainvoke([SystemMessage(content=system_msg)]+state["messages"])
 
             return {"messages": [response]}
         
@@ -276,17 +277,19 @@ class AssistantAgent:
                 self.pool = ConnectionPool(conn_string, kwargs={"autocommit": True})
                 self.memory = PostgresSaver(self.pool)
                 self.store = PostgresStore(self.pool)
+                self.memory.setup()
+                self.store.setup()
             else:
                 self.apool =  AsyncConnectionPool(conn_string,kwargs={"autocommit":True},open=False)
                 await self.apool.open(wait=True, timeout=5)
                 self.memory = AsyncPostgresSaver(self.apool)
                 self.store = AsyncPostgresStore(self.apool)
+                await self.memory.setup()
+                await self.store.setup()
         else:
             self.memory = InMemorySaver()
             self.store = InMemoryStore()
         #  NOTE: you need to call .setup() the first time you're using your checkpointer
-        self.memory.setup()
-        self.store.setup()
     
 
 ####
@@ -396,12 +399,14 @@ class AgentMemoryTools:
 
     def get_tools(self):
         # Create the Trustcall extractor for updating the user profile 
+        @tool
         def update_profile():
             """
             Docstring for update_profile
             to update user profile based on preference
             """
             return "update_profile"
+        @tool
         def update_history():
             """
             Docstring for update_history
