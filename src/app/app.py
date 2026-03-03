@@ -1,21 +1,21 @@
+import sys
+import asyncio
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+import pathlib
+PROJECT_PATH = pathlib.Path(__file__).absolute().parents[1].absolute()
+sys.path.insert(0,str(PROJECT_PATH))
 from fastapi import FastAPI,Response,status,Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_ollama.chat_models import ChatOllama
-import pathlib
-import sys
-PROJECT_PATH = pathlib.Path(__file__).absolute().parents[1].absolute()
-sys.path.insert(0,str(PROJECT_PATH))
-import time
 from agent.agent import AssistantAgent
 from typing import Union
-import asyncio
 from agent.mcp_client import get_client
 import logging
 logging.basicConfig(level=logging.ERROR,
                     format='%(asctime)s - %(levelname)s - %(message)s')
-if sys.platform.startswith("win"):
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 
 llm = ChatOllama( model="gpt-oss:20b",
     temperature="0")
@@ -36,21 +36,31 @@ def get_health(response:Response):
     return {"message":"Model is offline"}
 
 @app.post("/")
-def chat_assistant(message:str=Form(...),user_id:Union[str,int]=Form(...)):
+async def chat_assistant(message:str=Form(...),user_id:Union[str,int]=Form(...)):
+    global agent
     config = {"configurable": {"thread_id": user_id, "user_id": user_id}}
-    def event_generator():
-         for message_chunk,meta_data in agent.stream(
+    if (agent==None):
+        print("getting agent ")
+        agent = await init_agent()
+    async def event_generator():
+         async for message_chunk,meta_data in agent.astream(
             {"messages": message},
             config=config,
             version="v1",
             stream_mode="messages"
         ):
-            # print("message_chunk ",message_chunk)
-            # Only stream model tokens
+            is_tool = getattr(message_chunk, "is_tool_call", False)  # if your chunk has this attribute
+            # Or use meta_data flag if available
+            if meta_data.get("tool_name") or is_tool:
+                # skip streaming tool outputs
+                continue
             token = message_chunk.content
+            if isinstance(token, list):
+            # join list items into a single string
+                token = " ".join(str(c) for c in token)
             if token:
                 yield token
-                time.sleep(0.01)
+                await asyncio.sleep(0.01)
 
     return StreamingResponse(
         event_generator(),
@@ -92,7 +102,7 @@ async def init_agent():
                         llm=llm,
                         conn_string="postgresql://postgres:root@localhost:5432/agent_bot",
                         tools=tools,
-                        sync=True
+                        sync=False
                         ).get_graph()
     return agent
 
@@ -103,6 +113,6 @@ if __name__=="__main__":
        agent = asyncio.run(init_agent())
     except Exception as e:
         logging.error("Faild when initializing agent ",e)
-
     import uvicorn
-    uvicorn.run(app=app,host="127.0.0.1",port=4000)
+    # important on windows asyncio:SelectorEventLoop
+    uvicorn.run("app:app",loop="asyncio:SelectorEventLoop",host="127.0.0.1",port=4000,reload=False)
