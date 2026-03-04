@@ -52,7 +52,7 @@ async def chat_assistant(message:str=Form(...),user_id:Union[str,int]=Form(...))
         ):
             is_tool = getattr(message_chunk, "type", "")  # if your chunk has this attribute
             # Or use meta_data flag if available
-            if meta_data.get("langgraph_node","")=="tools" or is_tool=="tool_call":
+            if meta_data.get("langgraph_node","")=="tools" or is_tool=="tool_call" or meta_data.get("langgraph_node","")=="security_check":
                 # skip streaming tool outputs
                 continue
             token = message_chunk.content
