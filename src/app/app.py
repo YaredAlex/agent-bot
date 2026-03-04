@@ -16,8 +16,9 @@ import logging
 logging.basicConfig(level=logging.ERROR,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-llm = ChatOllama( model="gpt-oss:20b",
+# MODEL = "gpt-oss:20b"
+MODEL = "ministral-3:3b-instruct-2512-q4_K_M"
+llm = ChatOllama( model=MODEL,
     temperature="0")
 
 app = FastAPI(name="Agent Bot",debug=True)
@@ -49,12 +50,13 @@ async def chat_assistant(message:str=Form(...),user_id:Union[str,int]=Form(...))
             version="v1",
             stream_mode="messages"
         ):
-            is_tool = getattr(message_chunk, "is_tool_call", False)  # if your chunk has this attribute
+            is_tool = getattr(message_chunk, "type", "")  # if your chunk has this attribute
             # Or use meta_data flag if available
-            if meta_data.get("tool_name") or is_tool:
+            if meta_data.get("langgraph_node","")=="tools" or is_tool=="tool_call":
                 # skip streaming tool outputs
                 continue
             token = message_chunk.content
+            
             if isinstance(token, list):
             # join list items into a single string
                 token = " ".join(str(c) for c in token)
