@@ -502,6 +502,8 @@ class AssistantAgent:
         self.builder.add_edge("blocked",END)
         await self.init_memory()
         self.graph = self.builder.compile(checkpointer=self.memory,store=self.store)
+        with open("graph.png", "wb") as f:
+            f.write(self.graph.get_graph().draw_mermaid_png())
         return self.graph
     
     async def get_graph(self):
