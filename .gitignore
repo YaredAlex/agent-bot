@@ -2,3 +2,4 @@ env/
 demo.py
 __pycache__/
 .env
+graph.png
